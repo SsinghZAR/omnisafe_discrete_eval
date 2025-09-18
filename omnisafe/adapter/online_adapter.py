@@ -20,7 +20,7 @@ from typing import Any
 
 import torch
 
-from omnisafe.envs.core import CMDP, make, support_envs
+from omnisafe.envs.core import CMDP, make
 from omnisafe.envs.wrapper import (
     ActionScale,
     AutoReset,
@@ -57,13 +57,15 @@ class OnlineAdapter:
         cfgs: Config,
     ) -> None:
         """Initialize an instance of :class:`OnlineAdapter`."""
-        assert env_id in support_envs(), f'Env {env_id} is not supported.'
 
         self._cfgs: Config = cfgs
         self._device: torch.device = get_device(cfgs.train_cfgs.device)
         self._env_id: str = env_id
-        self._env: CMDP = make(env_id, num_envs=num_envs, device=self._device, seed=seed)
-        self._eval_env: CMDP = make(env_id, num_envs=1, device=self._device, seed=seed)
+        # If the env_id follows Morality Gym's composite format, hint the class name to bypass
+        # static support list requirements.
+        class_name = 'MoralityGymOmniSafeEnv' if '::' in env_id else None
+        self._env: CMDP = make(env_id, class_name=class_name, num_envs=num_envs, device=self._device, seed=seed)
+        self._eval_env: CMDP = make(env_id, class_name=class_name, num_envs=1, device=self._device, seed=seed)
 
         self._wrapper(
             obs_normalize=cfgs.algo_cfgs.obs_normalize,

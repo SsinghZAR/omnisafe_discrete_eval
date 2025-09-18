@@ -366,10 +366,14 @@ class EnvRegister:
         """
         if class_name is not None:
             assert class_name in self._class, f'{class_name} is not registered'
-            assert (
-                env_id in self._support_envs[class_name]
-            ), f'{env_id} is not supported by {class_name}'
+            # When the caller specifies the class explicitly, do not enforce support list checks.
             return self._class[class_name]
+
+        # Heuristic: composite Morality Gym IDs are in the form
+        # "experiment_name::morality_tree_id::repeat_idx". Route these to
+        # MoralityGymOmniSafeEnv if it is registered.
+        if '::' in env_id and 'MoralityGymOmniSafeEnv' in self._class:
+            return self._class['MoralityGymOmniSafeEnv']
 
         for cls_name, env_ids in self._support_envs.items():
             if env_id in env_ids:

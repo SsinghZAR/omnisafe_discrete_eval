@@ -19,7 +19,6 @@ from __future__ import annotations
 from typing import Any, ClassVar
 import gymnasium
 import torch
-import numpy as np
 
 from omnisafe.envs.core import CMDP, env_register
 
@@ -46,61 +45,20 @@ class MoralityGymOmniSafeEnv(CMDP):
 
     This class uses `make_experiment` from `morality-gym-tabular` to configure
     a specific environment variant and then wraps it with `OmniSafeMoralityGymWrapper`.
-    The `env_id` for OmniSafe registration should be in the format:
-    "experiment_name::morality_tree_id::repeat_idx"
-    (e.g., "Switch3-v0::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0")
+    The `env_id` for OmniSafe registration can be in either format:
+    - "experiment_name::morality_tree_id::repeat_idx"
+      (e.g., "Switch3-v0::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0")
+    - "experiment_name::morality_tree_id" (repeat_idx omitted)
+
+    If `repeat_idx` is omitted, a `seed` MUST be provided via the constructor; that `seed` is used
+    as the `repeat_idx`. If the pair (morality_tree_id, seed) does not exist among experiment
+    variants, an error will list available repeat indices.
     """
 
     # Define _support_envs with examples of valid composite IDs based on
     # your actual experiment JSON configurations.
     # This list is used by OmniSafe's initial environment check.
-    _support_envs: ClassVar[list[str]] = [
-        "PushOrSwitch-v1::Trolley-Common-DualProcess-Complex-v0::0",
-        "PushOrSwitch-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "PushOrSwitch-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "SwitchEasy-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "SwitchEasy-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "SwitchStandard-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "SwitchStandard-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "PushStandard-v1::Trolley-Common-DualProcess-Complex-v0::0",
-        "PushStandard-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "PushStandard-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "PushSelfSacrifice-v1::Trolley-Common-DualProcess-ComplexAgentHarm-v0::0",
-        "PushSelfSacrifice-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "PushSelfSacrifice-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm2-v0::0",
-        "SwitchSelfSacrifice1-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "SwitchSelfSacrifice1-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm2-v0::0",
-        "SwitchSelfSacrifice2-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "SwitchSelfSacrifice2-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm2-v0::0",
-        "PushOrSwitchSelfSacrifice-v1::Trolley-Common-DualProcess-ComplexAgentHarm-v0::0",
-        "PushOrSwitchSelfSacrifice-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "PushOrSwitchSelfSacrifice-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm2-v0::0",
-        "Push2Character-v1::Trolley-Common-DualProcess-Complex-v0::0",
-        "Push2Character-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "Push2Character-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "Switch2Trolley-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "Switch2Trolley-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "Switch3-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "Switch3-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "Switch7-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "Switch7-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "Switch2Character-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "Switch2Character-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "Switch2Trolley2Lever-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "Switch2Trolley2Lever-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "Switch2TrolleyDistractor-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "Switch2TrolleyDistractor-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "Switch2TrolleySelfSacrifice-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "Switch2TrolleySelfSacrifice-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "Switch3Trolley3Lever-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        "Switch3Trolley3Lever-v1::Trolley-Common-Utilitarian-OrderedOutcomeHarm1-v0::0",
-        "Switch3Trolley-v1::Trolley-Common-Utilitarian-OrderedUtilityHarm-v0::0",
-        # Add other specific variants for other experiments you intend to run with OmniSafe
-        # For example, if you have a Trolley-SwitchStandard-0-v0.json:
-        # "Trolley-SwitchStandard-0-v0::SomeTreeForTrolleySwitch::0",
-        # For example, if you have a Trolley-PushStandard-v0.json:
-        # "Trolley-PushStandard-v0::SomeTreeForTrolleyPush::0",
-    ]
+    _support_envs: ClassVar[list[str]] = []
 
     need_action_scale_wrapper = False
     need_obs_normalize_wrapper = False
@@ -119,24 +77,39 @@ class MoralityGymOmniSafeEnv(CMDP):
         self._device = device
         self._env_id_passed_to_init = env_id
 
-        try:
-            exp_name, tree_id, repeat_str = env_id.split('::')
-            repeat_idx = int(repeat_str)
-        except ValueError as e:
+        parts = env_id.split('::')
+        if len(parts) == 3:
+            exp_name, tree_id, repeat_str = parts
+            try:
+                repeat_idx = int(repeat_str)
+            except ValueError as e:
+                raise ValueError(
+                    f"MoralityGymOmniSafeEnv env_id '{env_id}' has an invalid repeat_idx. Error: {e}"
+                )
+        elif len(parts) == 2:
+            exp_name, tree_id = parts
+            if seed is None:
+                raise ValueError(
+                    f"MoralityGymOmniSafeEnv requires 'seed' when repeat_idx is omitted in env_id '{env_id}'."
+                )
+            repeat_idx = seed
+        else:
             raise ValueError(
-                f"MoralityGymOmniSafeEnv env_id '{env_id}' is not in the expected format \
-                'experiment_name::morality_tree_id::repeat_idx'. Error: {e}"
+                f"MoralityGymOmniSafeEnv env_id '{env_id}' is not in a recognized format. "
+                "Expected 'experiment_name::morality_tree_id' or 'experiment_name::morality_tree_id::repeat_idx'."
             )
 
         all_variants_make_kwargs, _, _ , _ = make_experiment(exp_name)
         
         #print(f"all_variants_make_kwargs: {all_variants_make_kwargs}")
         #exit()
+
         variant_key = (tree_id, repeat_idx)
         if variant_key not in all_variants_make_kwargs:
+            available_repeats = sorted({idx for (tree, idx) in all_variants_make_kwargs.keys() if tree == tree_id})
             raise ValueError(
-                f"Variant ('{tree_id}', {repeat_idx}) not found for experiment '{exp_name}'. \
-                Available variants: {list(all_variants_make_kwargs.keys())}"
+                f"Variant ('{tree_id}', {repeat_idx}) not found for experiment '{exp_name}'. "
+                f"Available repeats for '{tree_id}': {available_repeats}"
             )
         
         selected_curr_kwargs = all_variants_make_kwargs[variant_key]
@@ -171,14 +144,6 @@ class MoralityGymOmniSafeEnv(CMDP):
         self._observation_space = self._env.observation_space
         self.max_episode_steps = getattr(self._env.env, '_max_episode_steps', 1000)
 
-        #default_cost_limit = 0.0
-        #cost_limit_from_make_exp = selected_curr_kwargs.get('cost_limit')
-        #if 'cost_limit' in kwargs:
-        #    self._cost_limit = float(kwargs['cost_limit'])
-        #elif cost_limit_from_make_exp is not None:
-        #    self._cost_limit = float(cost_limit_from_make_exp)
-        #else:
-        #    self._cost_limit = default_cost_limit
 
     def step(
         self,
@@ -218,7 +183,7 @@ class MoralityGymOmniSafeEnv(CMDP):
         self._env.close()
 
     @property
-    def کامd_name(self) -> str: 
+    def env_name(self) -> str:
         return self._env_id_passed_to_init
 
     def sample_action(self) -> torch.Tensor:
@@ -244,11 +209,3 @@ class MoralityGymOmniSafeEnv(CMDP):
     # In __init__, add: self._env_id_passed_to_init = env_id (the registered one)
     # This is a bit of a placeholder; OmniSafe's core env might have a better way.
 
-# Need to add torch and numpy imports if not already present at the top level of the module
-# import torch
-# import numpy as np
-# Ensure these are present if the class uses them directly, which it does.
-# The linting might complain if they are only in the OmniSafeMoralityGymWrapper.
-# For robustness, let's add them here too.
-# import torch
-# import numpy as np 

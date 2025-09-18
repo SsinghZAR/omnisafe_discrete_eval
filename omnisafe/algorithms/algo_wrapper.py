@@ -24,7 +24,7 @@ import torch
 
 from omnisafe.algorithms import ALGORITHM2TYPE, ALGORITHMS, registry
 from omnisafe.algorithms.base_algo import BaseAlgo
-from omnisafe.envs import ENVIRONMNET2TYPE, support_envs
+from omnisafe.envs import ENVIRONMNET2TYPE
 from omnisafe.evaluator import Evaluator
 from omnisafe.utils import distributed
 from omnisafe.utils.config import Config, check_all_configs, get_default_kwargs_yaml
@@ -141,9 +141,7 @@ class AlgoWrapper:
         assert isinstance(self.algo, str), 'algo must be a string!'
         assert isinstance(self.cfgs.train_cfgs.parallel, int), 'parallel must be an integer!'
         assert self.cfgs.train_cfgs.parallel > 0, 'parallel must be greater than 0!'
-        assert (
-            self.env_id in support_envs()
-        ), f"{self.env_id} doesn't exist. Please choose from {support_envs()}."
+        # Skip static environment registry checks to allow dynamic environments (e.g., Morality Gym)
 
     def _init_algo(self) -> None:
         """Initialize the algorithm."""

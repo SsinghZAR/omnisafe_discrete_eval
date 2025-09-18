@@ -257,27 +257,39 @@ class PolicyGradient(BaseAlgo):
                 self._logger.log("ERROR: Morality Gym components not available, but morality evaluation was configured. Disabling periodic evaluation.")
                 self._morality_eval_freq = 0 # Disable
             elif not self._morality_exp_name:
-                self._logger.log("ERROR: morality_eval_cfgs.experiment_name not provided, but morality evaluation frequency > 0. Disabling periodic evaluation.")
-                self._morality_eval_freq = 0 # Disable
+                raise ValueError("morality_eval_cfgs.experiment_name is required when morality_eval_freq_epochs > 0.")
             else:
                 if hasattr(self._cfgs, 'env_id') and isinstance(self._cfgs.env_id, str):
                     try:
-                        # Assumes self._cfgs.env_id is like "ExperimentNameUsedForTraining::TreeId::RepeatIdx"
-                        # Note: The ExperimentNameUsedForTraining might be different from self._morality_exp_name
-                        # if the training env_id points to one config and eval uses another.
-                        # For simplicity, we parse from self._cfgs.env_id which is the one used for training.
-                        _, self._eval_morality_tree_id, self._eval_repeat_idx_str = self._cfgs.env_id.split('::')
+                        # env_id must be "ExperimentName::TreeId::RepeatIdx"
+                        exp_name_from_env, self._eval_morality_tree_id, self._eval_repeat_idx_str = self._cfgs.env_id.split('::')
                         self._eval_repeat_idx = int(self._eval_repeat_idx_str)
-                        self._logger.log(f"Periodic morality evaluation enabled: Freq={self._morality_eval_freq} epochs, ExpName={self._morality_exp_name}, Evaluating on variant part of {self._cfgs.env_id}")
                     except ValueError:
-                        self._logger.log(f"ERROR: Invalid env_id format ('{self._cfgs.env_id}') for parsing morality eval details. Expected 'ExpName::TreeId::RepeatIdx'. Disabling periodic evaluation.")
-                        self._morality_eval_freq = 0 # Disable evaluation
+                        raise ValueError(
+                            f"Invalid env_id format ('{self._cfgs.env_id}'). Expected 'ExpName::TreeId::RepeatIdx' for morality evaluation."
+                        )
+
+                    if self._morality_exp_name != exp_name_from_env:
+                        raise ValueError(
+                            f"morality_eval_cfgs.experiment_name ('{self._morality_exp_name}') must match the training experiment name ('{exp_name_from_env}') parsed from env_id."
+                        )
+
+                    # Validate the experiment config exists; raise if not found
+                    try:
+                        _ = make_experiment(self._morality_exp_name)  # type: ignore
+                    except Exception as e:
+                        raise FileNotFoundError(
+                            f"Morality evaluation experiment '{self._morality_exp_name}' could not be loaded via make_experiment: {e}"
+                        ) from e
+
+                    self._logger.log(
+                        f"Periodic morality evaluation enabled: Freq={self._morality_eval_freq} epochs, ExpName={self._morality_exp_name}, Evaluating on variant part of {self._cfgs.env_id}"
+                    )
                 else:
-                    self._logger.log(f"ERROR: env_id not found or not a string in self._cfgs. Cannot parse for morality eval details. Disabling periodic evaluation.")
-                    self._morality_eval_freq = 0 # Disable evaluation
-            
+                    raise ValueError("env_id not found or not a string in configs; required for morality evaluation.")
+
             if self._morality_eval_freq > 0: # If still enabled after checks
-                 self._logger.register_key('Time/MoralityEval')
+                self._logger.register_key('Time/MoralityEval')
 
     def learn(self) -> tuple[float, float, float]:
         """This is main function for algorithm update.
