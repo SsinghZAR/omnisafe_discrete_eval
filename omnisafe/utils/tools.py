@@ -274,7 +274,7 @@ def recursive_check_config(
         if key not in default_config and key not in exclude_keys:
             raise KeyError(f'Invalid key: {key}')
         if isinstance(config[key], dict):
-            recursive_check_config(config[key], default_config[key])
+            recursive_check_config(config[key], default_config[key], exclude_keys)
 
 
 def assert_with_exit(condition: bool, msg: str) -> None:

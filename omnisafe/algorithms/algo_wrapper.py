@@ -108,8 +108,10 @@ class AlgoWrapper:
                 self.custom_cfgs.pop('env_id')
             if 'algo' in self.custom_cfgs:
                 self.custom_cfgs.pop('algo')
-            # validate the keys of custom configuration
-            recursive_check_config(self.custom_cfgs, cfgs)
+            # validate the keys of custom configuration; allow new eval_freq_steps key (nested)
+            recursive_check_config(self.custom_cfgs, cfgs, exclude_keys=(
+                'eval_freq_steps',
+            ))
             # update the cfgs from custom configurations
             cfgs.recurisve_update(self.custom_cfgs)
             # save configurations specified in current experiment
@@ -121,8 +123,14 @@ class AlgoWrapper:
                 self.train_terminal_cfgs.pop('env_id')
             if 'algo' in self.train_terminal_cfgs:
                 self.train_terminal_cfgs.pop('algo')
-            # validate the keys of train_terminal_cfgs configuration
-            recursive_check_config(self.train_terminal_cfgs, cfgs.train_cfgs)
+            # validate the keys of train_terminal_cfgs configuration (allow morality_eval_freq_steps)
+            recursive_check_config(
+                self.train_terminal_cfgs,
+                cfgs.train_cfgs,
+                exclude_keys=(
+                    'morality_eval_freq_steps',
+                ),
+            )
             # update the cfgs.train_cfgs from train_terminal configurations
             cfgs.train_cfgs.recurisve_update(self.train_terminal_cfgs)
             # save configurations specified in current experiment
