@@ -44,6 +44,7 @@ try:
     from experiments.cost_function import Cost
     from experiments.baselines.common.setup import make_experiment
     from experiments.baselines.common.evaluate import eval_multi_variants
+    from experiments.baselines.common.utils import save_to_csv as baseline_save_to_csv
     from morality_gym.setup.setup import make as env_mt_make
     from morality_gym.wrappers.evaluation_wrapper import EvaluationEnvWrapper
     from experiments.baselines.common.evaluate import eval_multi_variants
@@ -247,15 +248,18 @@ class PolicyGradient(BaseAlgo):
         # Look for config nested under algo_cfgs now
         algo_cfgs_obj = getattr(self._cfgs, 'algo_cfgs', None)
         self._morality_eval_cfgs = getattr(algo_cfgs_obj, 'morality_eval_cfgs', {}) if algo_cfgs_obj else {}
-        
-        self._morality_eval_freq: int = self._morality_eval_cfgs.get('eval_freq_epochs', 0)
+
+        # Frequency can be specified in epochs or steps. Steps-based takes precedence if provided.
+        self._morality_eval_freq_epochs: int = int(self._morality_eval_cfgs.get('eval_freq_epochs', 0) or 0)
+        self._morality_eval_freq_steps: int = int(self._morality_eval_cfgs.get('eval_freq_steps', 0) or 0)
         self._morality_exp_name: str | None = self._morality_eval_cfgs.get('experiment_name', None)
         self._intermediate_morality_results: list[dict] = []
 
-        if self._morality_eval_freq > 0:
+        if (self._morality_eval_freq_epochs > 0) or (self._morality_eval_freq_steps > 0):
             if not _MORALITY_GYM_AVAILABLE:
                 self._logger.log("ERROR: Morality Gym components not available, but morality evaluation was configured. Disabling periodic evaluation.")
-                self._morality_eval_freq = 0 # Disable
+                self._morality_eval_freq_epochs = 0
+                self._morality_eval_freq_steps = 0
             elif not self._morality_exp_name:
                 raise ValueError("morality_eval_cfgs.experiment_name is required when morality_eval_freq_epochs > 0.")
             else:
@@ -281,15 +285,24 @@ class PolicyGradient(BaseAlgo):
                         raise FileNotFoundError(
                             f"Morality evaluation experiment '{self._morality_exp_name}' could not be loaded via make_experiment: {e}"
                         ) from e
-
-                    self._logger.log(
-                        f"Periodic morality evaluation enabled: Freq={self._morality_eval_freq} epochs, ExpName={self._morality_exp_name}, Evaluating on variant part of {self._cfgs.env_id}"
-                    )
+                    if self._morality_eval_freq_steps > 0:
+                        self._logger.log(
+                            f"Periodic morality evaluation enabled: Every {self._morality_eval_freq_steps} steps, ExpName={self._morality_exp_name}, Evaluating on variant part of {self._cfgs.env_id}"
+                        )
+                    else:
+                        self._logger.log(
+                            f"Periodic morality evaluation enabled: Every {self._morality_eval_freq_epochs} epochs, ExpName={self._morality_exp_name}, Evaluating on variant part of {self._cfgs.env_id}"
+                        )
                 else:
                     raise ValueError("env_id not found or not a string in configs; required for morality evaluation.")
 
-            if self._morality_eval_freq > 0: # If still enabled after checks
+            if (self._morality_eval_freq_epochs > 0) or (self._morality_eval_freq_steps > 0):
                 self._logger.register_key('Time/MoralityEval')
+                # Initialize step-based evaluation scheduling if used
+                self._total_env_steps: int = 0
+                self._next_eval_step: int | None = (
+                    self._morality_eval_freq_steps if self._morality_eval_freq_steps > 0 else None
+                )
 
     def learn(self) -> tuple[float, float, float]:
         """This is main function for algorithm update.
@@ -346,17 +359,35 @@ class PolicyGradient(BaseAlgo):
             self._logger.dump_tabular()
 
             # --- Optional: Periodic Morality Evaluation ---
-            if self._morality_eval_freq > 0: # Check if enabled first
-                perform_eval_this_epoch = (epoch + 1) % self._morality_eval_freq == 0
+            # Steps-based callback style evaluation
+            if self._morality_eval_freq_steps > 0 and self._next_eval_step is not None:
+                self._total_env_steps += self._cfgs.algo_cfgs.steps_per_epoch
+                while self._total_env_steps >= self._next_eval_step:
+                    self._logger.log(f"INFO: Performing morality evaluation at total steps {self._next_eval_step}")
+                    eval_start_time = time.time()
+                    self._perform_morality_evaluation(current_epoch=epoch, current_step=self._next_eval_step)
+                    self._logger.store({'Time/MoralityEval': time.time() - eval_start_time})
+                    # Save intermediate results if any
+                    if self._intermediate_morality_results:
+                        try:
+                            results_df = pd.DataFrame(self._intermediate_morality_results)
+                            intermediate_eval_path = os.path.join(self._logger.log_dir, 'intermediate_morality_evals.csv')
+                            results_df.to_csv(intermediate_eval_path, index=False)
+                            self._logger.log(f"INFO: Intermediate morality evaluation results saved to {intermediate_eval_path}")
+                        except Exception as e:
+                            self._logger.log(f"ERROR: Could not save intermediate morality evaluation results: {e}")
+                    self._next_eval_step += self._morality_eval_freq_steps
+
+            # Epoch-based evaluation (backward compatibility) if steps-based not configured
+            elif self._morality_eval_freq_epochs > 0:
+                perform_eval_this_epoch = (epoch + 1) % self._morality_eval_freq_epochs == 0
                 is_last_epoch = epoch == self._cfgs.train_cfgs.epochs - 1
                 if perform_eval_this_epoch or is_last_epoch:
                     self._logger.log(f"INFO: Performing morality evaluation at epoch {epoch+1}")
                     eval_start_time = time.time()
-                    self._perform_morality_evaluation(current_epoch=epoch)
+                    steps_at_epoch = (epoch + 1) * self._cfgs.algo_cfgs.steps_per_epoch
+                    self._perform_morality_evaluation(current_epoch=epoch, current_step=steps_at_epoch)
                     self._logger.store({'Time/MoralityEval': time.time() - eval_start_time})
-                    # self._logger.dump_tabular() # Optionally dump again if morality eval uses self._logger.store for its metrics
-
-                            # --- Save intermediate morality results if any ---
                     if self._intermediate_morality_results:
                         try:
                             results_df = pd.DataFrame(self._intermediate_morality_results)
@@ -661,7 +692,7 @@ class PolicyGradient(BaseAlgo):
         return loss
 
     # +++ Methods for Morality Evaluation (added) +++
-    def _perform_morality_evaluation(self, current_epoch: int) -> None:
+    def _perform_morality_evaluation(self, current_epoch: int, current_step: int | None = None) -> None:
         """
         Performs morality evaluation using eval_multi_variants and logs the results.
         This method is called periodically during training if configured.
@@ -670,7 +701,10 @@ class PolicyGradient(BaseAlgo):
             self._logger.log("CRITICAL_ERROR: _perform_morality_evaluation called but Morality Gym components not available.")
             return
         
-        self._logger.log(f"--- Starting Morality Evaluation for Epoch {current_epoch + 1} ---")
+        if current_step is not None:
+            self._logger.log(f"--- Starting Morality Evaluation (epoch {current_epoch + 1}, steps {current_step}) ---")
+        else:
+            self._logger.log(f"--- Starting Morality Evaluation for Epoch {current_epoch + 1} ---")
         
         # Ensure necessary attributes were set in _init_log
         if not (self._morality_exp_name and hasattr(self, '_eval_morality_tree_id') and hasattr(self, '_eval_repeat_idx')):
@@ -758,15 +792,20 @@ class PolicyGradient(BaseAlgo):
 
             # Log/Store results
             self._logger.log(f"Epoch {current_epoch + 1} Morality Eval - Avg Return: {avg_returns_learn}, Morality Metric: {morality_metric_learn}, Avg Cost: {avg_cost}")
-            
-            result_summary = {
-                "epoch": current_epoch + 1,
-                "avg_return_morality_eval": avg_returns_learn,
-                "morality_metric_eval": morality_metric_learn,
-                "avg_cost_morality_eval": avg_cost,
-                **morality_functions_learn 
-            }
-            self._intermediate_morality_results.append(result_summary)
+
+            # Save a row matching SB3's learner format with current step
+            try:
+                log_sub_dir = os.path.join(self._logger.log_dir, 'morality_metric')
+                os.makedirs(log_sub_dir, exist_ok=True)
+                csv_path = os.path.join(log_sub_dir, f"eval_step_{current_step if current_step is not None else (current_epoch+1)*self._cfgs.algo_cfgs.steps_per_epoch}.csv")
+                # Adapt structures to baseline save_to_csv signature
+                metrics_map = {('eval', 0): morality_metric_learn}
+                funcs_map = {('eval', 0): morality_functions_learn}
+                returns_map = {('eval', 0): avg_returns_learn}
+                infos_map = None
+                baseline_save_to_csv(metrics_map, funcs_map, returns_map, csv_path, infos_map)
+            except Exception as e:
+                self._logger.log(f"ERROR: Could not save morality evaluation CSV: {e}")
 
         except Exception as e:
             self._logger.log(f"ERROR: Exception during evaluate_morality_metric: {e}")
@@ -776,6 +815,9 @@ class PolicyGradient(BaseAlgo):
         finally:
             if eval_env is not None:
                 eval_env.close() # type: ignore
-            self._logger.log(f"--- Finished Morality Evaluation for Epoch {current_epoch + 1} ---")
+            if current_step is not None:
+                self._logger.log(f"--- Finished Morality Evaluation (epoch {current_epoch + 1}, steps {current_step}) ---")
+            else:
+                self._logger.log(f"--- Finished Morality Evaluation for Epoch {current_epoch + 1} ---")
 
     # --- End of Morality Evaluation Methods ---
